@@ -1,23 +1,105 @@
-name: Liquibase to BigQuery (Service Account JSON)
+name: Liquibase to BigQuery (PR + main + manual env)
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request:
     paths:
       - 'liquibase/**'
-      - '.github/workflows/bq-liquibase.yml'
+      - '.github/workflows/*.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'liquibase/**'
+      - '.github/workflows/*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (uses environment-scoped secrets)"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+      project_id:
+        description: "Optional override: GCP Project ID (defaults to env secret)"
+        required: false
+        type: string
+      dataset:
+        description: "Optional override: BigQuery dataset (defaults to env secret)"
+        required: false
+        type: string
+      sa_email:
+        description: "Optional override: Service Account email (defaults to env secret)"
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  # ------------------------------------------------------------
+  # PR job: validate & generate SQL only (no secrets required)
+  # ------------------------------------------------------------
+  pr_dry_run:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download Liquibase CLI
+        run: |
+          curl -L -o "$RUNNER_TEMP/liquibase.zip" https://github.com/liquibase/liquibase/releases/download/v4.29.2/liquibase-4.29.2.zip
+          unzip -q "$RUNNER_TEMP/liquibase.zip" -d "$HOME/liquibase"
+          chmod +x "$HOME/liquibase/liquibase"
+          echo "LB=$HOME/liquibase/liquibase" >> "$GITHUB_ENV"
+
+      - name: Sanity check repo files
+        run: |
+          pwd
+          ls -la
+          ls -la liquibase
+          ls -la liquibase/changesets
+
+      - name: Liquibase validate (no DB)
+        shell: bash
+        working-directory: liquibase
+        run: |
+          set -euo pipefail
+          "$LB" --changeLogFile=changelog.xml validate
+
+      - name: Liquibase updateSQL (dry run)
+        shell: bash
+        working-directory: liquibase
+        run: |
+          set -euo pipefail
+          "$LB" --changeLogFile=changelog.xml updateSQL > "$RUNNER_TEMP/dry-run.sql"
+          sed -n '1,200p' "$RUNNER_TEMP/dry-run.sql" || true
+
+      - name: Upload dry-run SQL
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquibase-dry-run-sql
+          path: ${{ runner.temp }}/dry-run.sql
+
+  # ------------------------------------------------------------
+  # main push: real deploy (uses existing REPO secrets)
+  # ------------------------------------------------------------
+  deploy_main:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
 
     env:
       PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       BQ_DATASET: ${{ secrets.BQ_DATASET }}
-      SA_EMAIL: ${{ secrets.GCP_SA_EMAIL }}
+      SA_EMAIL:   ${{ secrets.GCP_SA_EMAIL }}
 
     steps:
       - name: Checkout
@@ -41,14 +123,14 @@ jobs:
 
       - name: Download Liquibase BigQuery extension (JAR)
         run: |
-          curl -L -o lib/liquibase-bigquery-4.33.0.jar https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
+          curl -L -o lib/liquibase-bigquery-4.33.0.jar \
+            https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
 
       - name: Download BigQuery JDBC driver (Simba)
         run: |
           set -e
           curl -L -o "$RUNNER_TEMP/bqjdbc.zip" "https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip"
           unzip -q "$RUNNER_TEMP/bqjdbc.zip" -d "$RUNNER_TEMP/bqjdbc"
-          # Copy ALL jars (root + lib/) into ./lib
           find "$RUNNER_TEMP/bqjdbc" -type f -name "*.jar" -exec cp -v {} lib/ \;
           ls -la lib
 
@@ -64,13 +146,11 @@ jobs:
           ls -la liquibase
           ls -la liquibase/changesets
 
-      # Run Liquibase from the liquibase/ folder so relative paths resolve
-      - name: Liquibase update
+      - name: Liquibase validate (DB)
         shell: bash
         working-directory: liquibase
         run: |
           set -euo pipefail
-          # Build a classpath from absolute paths of all jars in lib/
           shopt -s nullglob
           jars=("$GITHUB_WORKSPACE"/lib/*.jar)
           if [ ${#jars[@]} -eq 0 ]; then
@@ -78,8 +158,119 @@ jobs:
             exit 1
           fi
           CLASSPATH=$(IFS=:; echo "${jars[*]}")
-          echo "Using CLASSPATH: $CLASSPATH"
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=changelog.xml \
+            validate
 
+      - name: Liquibase update (deploy)
+        shell: bash
+        working-directory: liquibase
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=changelog.xml \
+            --log-level=info \
+            update
+
+  # ------------------------------------------------------------
+  # Manual env deploy: choose dev/qa/prod (uses ENVIRONMENT secrets)
+  # ------------------------------------------------------------
+  deploy_manual:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}   # pulls environment-scoped secrets
+
+    # Prevent concurrent deploys to the same environment
+    concurrency:
+      group: liquibase-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    env:
+      PROJECT_ID: ${{ inputs.project_id != '' && inputs.project_id || secrets.GCP_PROJECT_ID }}
+      BQ_DATASET: ${{ inputs.dataset != '' && inputs.dataset || secrets.BQ_DATASET }}
+      SA_EMAIL:   ${{ inputs.sa_email != '' && inputs.sa_email || secrets.GCP_SA_EMAIL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare folders
+        run: mkdir -p lib
+
+      - name: Download Liquibase CLI
+        run: |
+          curl -L -o "$RUNNER_TEMP/liquibase.zip" https://github.com/liquibase/liquibase/releases/download/v4.29.2/liquibase-4.29.2.zip
+          unzip -q "$RUNNER_TEMP/liquibase.zip" -d "$HOME/liquibase"
+          chmod +x "$HOME/liquibase/liquibase"
+          echo "LB=$HOME/liquibase/liquibase" >> "$GITHUB_ENV"
+
+      - name: Download Liquibase BigQuery extension (JAR)
+        run: |
+          curl -L -o lib/liquibase-bigquery-4.33.0.jar \
+            https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
+
+      - name: Download BigQuery JDBC driver (Simba)
+        run: |
+          set -e
+          curl -L -o "$RUNNER_TEMP/bqjdbc.zip" "https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip"
+          unzip -q "$RUNNER_TEMP/bqjdbc.zip" -d "$RUNNER_TEMP/bqjdbc"
+          find "$RUNNER_TEMP/bqjdbc" -type f -name "*.jar" -exec cp -v {} lib/ \;
+          ls -la lib
+
+      - name: Write service account key & set path (from ENVIRONMENT secret)
+        run: |
+          printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
+          echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Sanity check repo files
+        run: |
+          pwd
+          ls -la
+          ls -la liquibase
+          ls -la liquibase/changesets
+
+      - name: Liquibase validate (DB)
+        shell: bash
+        working-directory: liquibase
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
+            exit 1
+          fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=changelog.xml \
+            validate
+
+      - name: Liquibase update (deploy)
+        shell: bash
+        working-directory: liquibase
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
           "$LB" \
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
