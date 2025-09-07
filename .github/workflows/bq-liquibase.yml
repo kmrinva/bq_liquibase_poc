@@ -35,27 +35,36 @@ jobs:
           mkdir -p lib
           curl -L -o lib/liquibase-bigquery.jar https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
 
-      - name: Fetch BigQuery JDBC driver (Simba)
-        # Option A: pull from your private URL/artifact store
-        # Option B: if you’ve attached it to a private GitHub Release, download it here.
-        run: |
-          echo ">> Place your GoogleBigQueryJDBC42.jar in lib/"
-          # Example: curl -L -o lib/GoogleBigQueryJDBC42.jar <your-private-url>
+        - name: Download BigQuery JDBC driver (Simba)
+          run: |
+            # Grab the current JDBC 4.2 driver zip from Google
+            curl -L -o $RUNNER_TEMP/bqjdbc.zip "https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip"
+            unzip -q $RUNNER_TEMP/bqjdbc.zip -d $RUNNER_TEMP/bqjdbc
+            mkdir -p lib
+            # Copy the main jar and all dependencies from the zip into ./lib
+            cp -v $RUNNER_TEMP/bqjdbc/GoogleBigQueryJDBC42.jar lib/ || true
+            cp -v $RUNNER_TEMP/bqjdbc/*.jar lib/ || true
+            cp -v $RUNNER_TEMP/bqjdbc/lib/*.jar lib/ || true
+            ls -l lib
 
       - name: Write SA key to file & set ADC env
         run: |
           echo '${{ secrets.GCP_SA_KEY }}' > $RUNNER_TEMP/sa.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> $GITHUB_ENV
 
-      - name: Liquibase update
+     - name: Liquibase update (apply DDL)
         env:
-          PROJECT_ID: ${{ env.PROJECT_ID }}
-          BQ_DATASET: ${{ env.BQ_DATASET }}
+            LB: ${{ env.LB }}
+            SA_KEY_PATH: ${{ env.SA_KEY_PATH }}
+            PROJECT_ID: ${{ env.PROJECT_ID }}
+            BQ_DATASET: ${{ env.BQ_DATASET }}
+            SA_EMAIL: ${{ env.SA_EMAIL }}
         run: |
-          LB=$HOME/liquibase/liquibase
-          CLASSPATH="lib/liquibase-bigquery.jar:lib/GoogleBigQueryJDBC42.jar"
-          $LB \
-            --classpath="$CLASSPATH" \
-            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET}" \
-            --changeLogFile=liquibase/changelog.xml \
-            update
+            CLASSPATH="lib/*"
+            "$LB" \
+              --driver=com.simba.googlebigquery.jdbc.Driver \
+              --classpath="$CLASSPATH" \
+              --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+              --changeLogFile=liquibase/changelog.xml \
+              --log-level=info \
+              update 
