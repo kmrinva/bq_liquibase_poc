@@ -56,6 +56,13 @@ jobs:
         run: |
           printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
           echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          
+      - name: Sanity check repo files
+        run: |
+          pwd
+          ls -la
+          ls -la liquibase
+          ls -la liquibase/changesets    
 
       - name: Liquibase update
         shell: bash
