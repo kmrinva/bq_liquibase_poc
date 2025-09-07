@@ -1,0 +1,61 @@
+name: Liquibase → BigQuery (PoC)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'liquibase/**'
+      - '.github/workflows/bq-liquibase.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set env
+        run: |
+          echo "PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+          echo "BQ_DATASET=${{ secrets.BQ_DATASET }}" >> $GITHUB_ENV
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download Liquibase CLI
+        run: |
+          curl -L -o liquibase.zip https://github.com/liquibase/liquibase/releases/download/v4.29.2/liquibase-4.29.2.zip
+          unzip -q liquibase.zip -d $HOME/liquibase
+
+      - name: Fetch Liquibase BigQuery extension (JAR)
+        run: |
+          mkdir -p lib
+          curl -L -o lib/liquibase-bigquery.jar https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
+
+      - name: Fetch BigQuery JDBC driver (Simba)
+        # Option A: pull from your private URL/artifact store
+        # Option B: if you’ve attached it to a private GitHub Release, download it here.
+        run: |
+          echo ">> Place your GoogleBigQueryJDBC42.jar in lib/"
+          # Example: curl -L -o lib/GoogleBigQueryJDBC42.jar <your-private-url>
+
+      - name: Write SA key to file & set ADC env
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > $RUNNER_TEMP/sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> $GITHUB_ENV
+
+      - name: Liquibase update
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          BQ_DATASET: ${{ env.BQ_DATASET }}
+        run: |
+          LB=$HOME/liquibase/liquibase
+          CLASSPATH="lib/liquibase-bigquery.jar:lib/GoogleBigQueryJDBC42.jar"
+          $LB \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET}" \
+            --changeLogFile=liquibase/changelog.xml \
+            update
