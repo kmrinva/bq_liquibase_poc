@@ -1,4 +1,4 @@
-name: Liquibase to BigQuery (PR + main + manual env)
+name: Liquibase to BigQuery (PR + main + manual env w/ central tracking)
 
 on:
   pull_request:
@@ -13,28 +13,32 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment (uses environment-scoped secrets)"
+        description: "Target environment (uses environment-scoped secrets if configured)"
         required: true
         type: choice
-        options:
-          - dev
-          - qa
-          - prod
+        options: [ dev, qa, prod ]
       project_id:
-        description: "Optional override: GCP Project ID (defaults to env secret)"
+        description: "Optional override: GCP Project ID (defaults to env/repo secret)"
         required: false
         type: string
       dataset:
-        description: "Optional override: BigQuery dataset (defaults to env secret)"
+        description: "Optional override: BigQuery dataset (defaults to env/repo secret)"
         required: false
         type: string
       sa_email:
-        description: "Optional override: Service Account email (defaults to env secret)"
+        description: "Optional override: Service Account email (defaults to env/repo secret)"
         required: false
         type: string
 
 permissions:
   contents: read
+
+# -------------------------------------------
+# Helper: builds CLASSPATH from lib/*.jar
+# -------------------------------------------
+defaults:
+  run:
+    shell: bash
 
 jobs:
   # ------------------------------------------------------------
@@ -69,14 +73,12 @@ jobs:
           ls -la liquibase/changesets
 
       - name: Liquibase validate (no DB)
-        shell: bash
         working-directory: liquibase
         run: |
           set -euo pipefail
           "$LB" --changeLogFile=changelog.xml validate
 
       - name: Liquibase updateSQL (dry run)
-        shell: bash
         working-directory: liquibase
         run: |
           set -euo pipefail
@@ -90,7 +92,7 @@ jobs:
           path: ${{ runner.temp }}/dry-run.sql
 
   # ------------------------------------------------------------
-  # main push: real deploy (uses existing REPO secrets)
+  # main push: real deploy (uses REPO secrets)
   # ------------------------------------------------------------
   deploy_main:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -100,6 +102,8 @@ jobs:
       PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       BQ_DATASET: ${{ secrets.BQ_DATASET }}
       SA_EMAIL:   ${{ secrets.GCP_SA_EMAIL }}
+      # Optional: set BQ_LOCATION secret to match your region (defaults to US)
+      BQ_LOCATION: ${{ secrets.BQ_LOCATION }}
 
     steps:
       - name: Checkout
@@ -139,6 +143,33 @@ jobs:
           printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
           echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
+      # --- Ensure central tracking dataset exists (liquibase_meta) ---
+      - name: Auth to GCP for gcloud (ADC)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Ensure liquibase_meta dataset exists (create if missing)
+        run: |
+          set -euo pipefail
+          : "${BQ_LOCATION:=US}"
+          echo "Ensuring dataset ${PROJECT_ID}:liquibase_meta exists in ${BQ_LOCATION}…"
+          if ! bq --project_id="${PROJECT_ID}" --location="${BQ_LOCATION}" show --format=prettyjson "${PROJECT_ID}:liquibase_meta" >/dev/null 2>&1; then
+            bq --project_id="${PROJECT_ID}" --location="${BQ_LOCATION}" mk --dataset "${PROJECT_ID}:liquibase_meta"
+            echo "Created dataset ${PROJECT_ID}:liquibase_meta"
+          else
+            echo "Dataset already exists."
+          fi
+          # Optional: grant editor on tracking dataset to the SA (usually not needed if SA created it)
+          bq query --use_legacy_sql=false <<'SQL' || true
+          GRANT `roles/bigquery.dataEditor`
+          ON SCHEMA `${PROJECT_ID}`.liquibase_meta
+          TO "serviceAccount:${SA_EMAIL}"
+          SQL
+
       - name: Sanity check repo files
         run: |
           pwd
@@ -146,8 +177,7 @@ jobs:
           ls -la liquibase
           ls -la liquibase/changesets
 
-      - name: Liquibase validate (DB)
-        shell: bash
+      - name: Liquibase validate (DB, central tracking)
         working-directory: liquibase
         run: |
           set -euo pipefail
@@ -162,11 +192,12 @@ jobs:
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
             --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --liquibase-schema-name=liquibase_meta \
+            --liquibase-catalog-name=${PROJECT_ID} \
             --changeLogFile=changelog.xml \
             validate
 
-      - name: Liquibase update (deploy)
-        shell: bash
+      - name: Liquibase update (deploy, central tracking)
         working-directory: liquibase
         run: |
           set -euo pipefail
@@ -177,19 +208,20 @@ jobs:
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
             --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --liquibase-schema-name=liquibase_meta \
+            --liquibase-catalog-name=${PROJECT_ID} \
             --changeLogFile=changelog.xml \
             --log-level=info \
             update
 
   # ------------------------------------------------------------
-  # Manual env deploy: choose dev/qa/prod (uses ENVIRONMENT secrets)
+  # Manual env deploy: choose dev/qa/prod (uses ENVIRONMENT or REPO secrets)
   # ------------------------------------------------------------
   deploy_manual:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}   # pulls environment-scoped secrets
+    environment: ${{ inputs.environment }}   # pulls environment-scoped secrets if defined
 
-    # Prevent concurrent deploys to the same environment
     concurrency:
       group: liquibase-${{ inputs.environment }}
       cancel-in-progress: false
@@ -198,6 +230,7 @@ jobs:
       PROJECT_ID: ${{ inputs.project_id != '' && inputs.project_id || secrets.GCP_PROJECT_ID }}
       BQ_DATASET: ${{ inputs.dataset != '' && inputs.dataset || secrets.BQ_DATASET }}
       SA_EMAIL:   ${{ inputs.sa_email != '' && inputs.sa_email || secrets.GCP_SA_EMAIL }}
+      BQ_LOCATION: ${{ secrets.BQ_LOCATION }}
 
     steps:
       - name: Checkout
@@ -232,10 +265,36 @@ jobs:
           find "$RUNNER_TEMP/bqjdbc" -type f -name "*.jar" -exec cp -v {} lib/ \;
           ls -la lib
 
-      - name: Write service account key & set path (from ENVIRONMENT secret)
+      - name: Write service account key & set path (from ENV/REPO secret)
         run: |
           printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
           echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      # --- Ensure central tracking dataset exists (liquibase_meta) ---
+      - name: Auth to GCP for gcloud (ADC)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Ensure liquibase_meta dataset exists (create if missing)
+        run: |
+          set -euo pipefail
+          : "${BQ_LOCATION:=US}"
+          echo "Ensuring dataset ${PROJECT_ID}:liquibase_meta exists in ${BQ_LOCATION}…"
+          if ! bq --project_id="${PROJECT_ID}" --location="${BQ_LOCATION}" show --format=prettyjson "${PROJECT_ID}:liquibase_meta" >/dev/null 2>&1; then
+            bq --project_id="${PROJECT_ID}" --location="${BQ_LOCATION}" mk --dataset "${PROJECT_ID}:liquibase_meta"
+            echo "Created dataset ${PROJECT_ID}:liquibase_meta"
+          else
+            echo "Dataset already exists."
+          fi
+          bq query --use_legacy_sql=false <<'SQL' || true
+          GRANT `roles/bigquery.dataEditor`
+          ON SCHEMA `${PROJECT_ID}`.liquibase_meta
+          TO "serviceAccount:${SA_EMAIL}"
+          SQL
 
       - name: Sanity check repo files
         run: |
@@ -244,8 +303,7 @@ jobs:
           ls -la liquibase
           ls -la liquibase/changesets
 
-      - name: Liquibase validate (DB)
-        shell: bash
+      - name: Liquibase validate (DB, central tracking)
         working-directory: liquibase
         run: |
           set -euo pipefail
@@ -260,11 +318,12 @@ jobs:
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
             --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --liquibase-schema-name=liquibase_meta \
+            --liquibase-catalog-name=${PROJECT_ID} \
             --changeLogFile=changelog.xml \
             validate
 
-      - name: Liquibase update (deploy)
-        shell: bash
+      - name: Liquibase update (deploy, central tracking)
         working-directory: liquibase
         run: |
           set -euo pipefail
@@ -275,6 +334,8 @@ jobs:
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
             --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --liquibase-schema-name=liquibase_meta \
+            --liquibase-catalog-name=${PROJECT_ID} \
             --changeLogFile=changelog.xml \
             --log-level=info \
             update
