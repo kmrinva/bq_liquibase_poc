@@ -1,4 +1,4 @@
-name: Liquibase → BigQuery (Service Account JSON)
+name: Liquibase to BigQuery (Service Account JSON)
 
 on:
   workflow_dispatch:
@@ -36,6 +36,7 @@ jobs:
         run: |
           curl -L -o "$RUNNER_TEMP/liquibase.zip" https://github.com/liquibase/liquibase/releases/download/v4.29.2/liquibase-4.29.2.zip
           unzip -q "$RUNNER_TEMP/liquibase.zip" -d "$HOME/liquibase"
+          chmod +x "$HOME/liquibase/liquibase"
           echo "LB=$HOME/liquibase/liquibase" >> "$GITHUB_ENV"
 
       - name: Download Liquibase BigQuery extension (JAR)
@@ -49,41 +50,40 @@ jobs:
           unzip -q "$RUNNER_TEMP/bqjdbc.zip" -d "$RUNNER_TEMP/bqjdbc"
           # Copy ALL jars (root + lib/) into ./lib
           find "$RUNNER_TEMP/bqjdbc" -type f -name "*.jar" -exec cp -v {} lib/ \;
-          echo "== Contents of lib after JDBC download =="
           ls -la lib
 
       - name: Write service account key & set path
         run: |
           printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
           echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
-          
+
       - name: Sanity check repo files
         run: |
           pwd
           ls -la
           ls -la liquibase
-          ls -la liquibase/changesets    
+          ls -la liquibase/changesets
 
+      # Run Liquibase from the liquibase/ folder so relative paths resolve
       - name: Liquibase update
         shell: bash
+        working-directory: liquibase
         run: |
           set -euo pipefail
-          # Build a colon-separated classpath from all jars in lib/
+          # Build a classpath from absolute paths of all jars in lib/
           shopt -s nullglob
-          jars=(lib/*.jar)
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
           if [ ${#jars[@]} -eq 0 ]; then
-            echo "ERROR: No JARs found in ./lib. Check previous steps."
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
             exit 1
           fi
           CLASSPATH=$(IFS=:; echo "${jars[*]}")
           echo "Using CLASSPATH: $CLASSPATH"
-          # Run Liquibase
+
           "$LB" \
             --driver=com.simba.googlebigquery.jdbc.Driver \
             --classpath="$CLASSPATH" \
             --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-            --changeLogFile=liquibase/changelog.xml \
+            --changeLogFile=changelog.xml \
             --log-level=info \
             update
-
-
