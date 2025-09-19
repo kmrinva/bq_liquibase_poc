@@ -117,8 +117,8 @@ jobs:
       - name: Upload updateSQL artifact
         uses: actions/upload-artifact@v4
         with:
-          name: updateSQL-${{ env.LB_TAG }}
-          path: liquibase_update_${{ env.LB_TAG }}.sql
+          name: updateSQL-${ env.LB_TAG }
+          path: liquibase_update_${ env.LB_TAG }.sql
 
       - name: Tag pre-deploy state
         shell: bash
@@ -140,7 +140,7 @@ jobs:
                     --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
                     --changeLogFile=changelog.xml \
                     --log-level=info \
-                    tag "$LB_TAG"
+                    tag "${LB_TAG}"
 
       - name: Update (apply pending changes)
         shell: bash
@@ -190,7 +190,7 @@ jobs:
                       --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
                       --changeLogFile=changelog.xml \
                       --log-level=info \
-                      rollback --tag="$LB_TAG" || true
+                      rollback --tag="${LB_TAG}" || true
 
       - name: Release Liquibase locks
         if: always()
