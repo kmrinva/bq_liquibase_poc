@@ -138,7 +138,7 @@ jobs:
                     --driver=com.simba.googlebigquery.jdbc.Driver \
                     --classpath="$CLASSPATH" \
                     --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-                    --changeLogFile=changelog.xml \
+                    --changeLogFile=liquibase/changelog.xml \
                     --log-level=info \
                     tag "${LB_TAG}"
 
