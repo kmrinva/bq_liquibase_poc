@@ -128,45 +128,59 @@ jobs:
         id: tag_predeploy
         shell: bash
         run: |
-                  set -euo pipefail
-                  # Build a classpath from absolute paths of all jars in lib/
-                  shopt -s nullglob
-                  jars=("$GITHUB_WORKSPACE"/lib/*.jar)
-                  if [ ${#jars[@]} -eq 0 ]; then
-                    echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
-                    exit 1
-                  fi
-                  CLASSPATH=$(IFS=:; echo "${jars[*]}")
-                  echo "Using CLASSPATH: $CLASSPATH"
-
-                  "$LB" \
-                    --driver=com.simba.googlebigquery.jdbc.Driver \
-                    --classpath="$CLASSPATH" \
-                    --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-                    --changeLogFile=liquibase/changelog.xml \
-                    --log-level=info \
-                    tag "${LB_TAG}"
-
-
-          echo "tagged=true" >> "$GITHUB_OUTPUT"      - name: Update (apply pending changes)
-        shell: bash
-        run: |
           set -euo pipefail
           # Build a classpath from absolute paths of all jars in lib/
           shopt -s nullglob
           jars=("$GITHUB_WORKSPACE"/lib/*.jar)
-          if [ $${#jars[@]} -eq 0 ]; then
+          if [ ${#jars[@]} -eq 0 ]; then
             echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
             exit 1
           fi
           CLASSPATH=$(IFS=:; echo "${jars[*]}")
           echo "Using CLASSPATH: $CLASSPATH"
 
-          if ! "$LB"   --driver=com.simba.googlebigquery.jdbc.Driver   --classpath="$CLASSPATH"   --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}"   --changeLogFile=liquibase/changelog.xml   --log-level=info   update; then
-            echo "Update failed — attempting rollback to $${LB_TAG}…"
-            "$LB"     --driver=com.simba.googlebigquery.jdbc.Driver     --classpath="$CLASSPATH"     --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}"     --changeLogFile=liquibase/changelog.xml     --log-level=info     rollback --tag="$${LB_TAG}" || echo "Rollback attempt failed (no tag or no rollback blocks?)."
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=liquibase/changelog.xml \
+            --log-level=info \
+            tag "${LB_TAG}"
+
+          echo "tagged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update (apply pending changes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build a classpath from absolute paths of all jars in lib/
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
             exit 1
           fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          echo "Using CLASSPATH: $CLASSPATH"
+
+          if ! "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=liquibase/changelog.xml \
+            --log-level=info \
+            update; then
+            echo "Update failed — attempting rollback to ${LB_TAG}…"
+            "$LB" \
+              --driver=com.simba.googlebigquery.jdbc.Driver \
+              --classpath="$CLASSPATH" \
+              --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+              --changeLogFile=liquibase/changelog.xml \
+              --log-level=info \
+              rollback --tag="${LB_TAG}" || echo "Rollback attempt failed (no tag or no rollback blocks?)."
+            exit 1
+          fi
+
       - name: Post-deploy smoke checks
         shell: bash
         run: echo "OK"
@@ -176,67 +190,67 @@ jobs:
         shell: bash
         run: |
           echo "Deployment failed. Rolling back to $LB_TAG…"
-                    set -euo pipefail
-                    # Build a classpath from absolute paths of all jars in lib/
-                    shopt -s nullglob
-                    jars=("$GITHUB_WORKSPACE"/lib/*.jar)
-                    if [ ${#jars[@]} -eq 0 ]; then
-                      echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
-                      exit 1
-                    fi
-                    CLASSPATH=$(IFS=:; echo "${jars[*]}")
-                    echo "Using CLASSPATH: $CLASSPATH"
-          
-                    "$LB" \
-                      --driver=com.simba.googlebigquery.jdbc.Driver \
-                      --classpath="$CLASSPATH" \
-                      --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-                      --changeLogFile=liquibase/changelog.xml \
-                      --log-level=info \
-                      rollback --tag="${LB_TAG}" || true
+          set -euo pipefail
+          # Build a classpath from absolute paths of all jars in lib/
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
+            exit 1
+          fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          echo "Using CLASSPATH: $CLASSPATH"
+
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=liquibase/changelog.xml \
+            --log-level=info \
+            rollback --tag="${LB_TAG}" || true
 
       - name: Release Liquibase locks
         if: always()
         shell: bash
         run: |
-                    set -euo pipefail
-                    # Build a classpath from absolute paths of all jars in lib/
-                    shopt -s nullglob
-                    jars=("$GITHUB_WORKSPACE"/lib/*.jar)
-                    if [ ${#jars[@]} -eq 0 ]; then
-                      echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
-                      exit 1
-                    fi
-                    CLASSPATH=$(IFS=:; echo "${jars[*]}")
-                    echo "Using CLASSPATH: $CLASSPATH"
-          
-                    "$LB" \
-                      --driver=com.simba.googlebigquery.jdbc.Driver \
-                      --classpath="$CLASSPATH" \
-                      --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-                      --changeLogFile=liquibase/changelog.xml \
-                      --log-level=info \
-                      releaseLocks || true
+          set -euo pipefail
+          # Build a classpath from absolute paths of all jars in lib/
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
+            exit 1
+          fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          echo "Using CLASSPATH: $CLASSPATH"
+
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=liquibase/changelog.xml \
+            --log-level=info \
+            releaseLocks || true
 
       - name: Status (post success/rollback)
         if: always()
         shell: bash
         run: |
-                    set -euo pipefail
-                    # Build a classpath from absolute paths of all jars in lib/
-                    shopt -s nullglob
-                    jars=("$GITHUB_WORKSPACE"/lib/*.jar)
-                    if [ ${#jars[@]} -eq 0 ]; then
-                      echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
-                      exit 1
-                    fi
-                    CLASSPATH=$(IFS=:; echo "${jars[*]}")
-                    echo "Using CLASSPATH: $CLASSPATH"
-          
-                    "$LB" \
-                      --driver=com.simba.googlebigquery.jdbc.Driver \
-                      --classpath="$CLASSPATH" \
-                      --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
-                      --changeLogFile=liquibase/changelog.xml \
-                      --log-level=info \
-                      status --verbose || true
+          set -euo pipefail
+          # Build a classpath from absolute paths of all jars in lib/
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib. Check previous steps."
+            exit 1
+          fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          echo "Using CLASSPATH: $CLASSPATH"
+
+          "$LB" \
+            --driver=com.simba.googlebigquery.jdbc.Driver \
+            --classpath="$CLASSPATH" \
+            --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
+            --changeLogFile=liquibase/changelog.xml \
+            --log-level=info \
+            status --verbose || true
