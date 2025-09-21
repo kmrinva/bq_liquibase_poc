@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_customer`
   state_province STRING OPTIONS(description="State or province code"),
   city STRING OPTIONS(description="City name"),
   postal_code STRING OPTIONS(description="Postal/ZIP code"),
-  customer_since DATE OPTIONS(description="First purchase or onboarding date"),
+  customer_since DATE OPTIONS(description="First purchase or onboarding date")
   status STRING OPTIONS(description="Lifecycle status, e.g., ACTIVE, INACTIVE")
 )
 OPTIONS(description="Customer dimension with contact and geography attributes");

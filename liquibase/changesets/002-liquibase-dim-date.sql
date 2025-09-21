@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
 PARTITION BY date_key
 OPTIONS(description="Date dimension with standard calendar attributes");
 
-ALTER TABLE `${project_id}.${dataset}.liquibase_dim_date`
+ALTER TABLE `my_poc_dataset.liquibase_dim_date`
   ADD CONSTRAINT pk_liquibase_dim_date PRIMARY KEY(date_key) NOT ENFORCED;
 
 --rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_date`;
