@@ -19,6 +19,7 @@ jobs:
       BQ_DATASET: ${{ secrets.BQ_DATASET }}
       SA_EMAIL: ${{ secrets.GCP_SA_EMAIL }}
       DRY_RUN_ENABLED: 'true'
+      LB_TAG: run-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
