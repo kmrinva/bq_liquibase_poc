@@ -114,15 +114,16 @@ jobs:
                     --url="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}" \
                     --changeLogFile=liquibase/changelog.xml \
                     --log-level=info \
-                    --output-file="liquibase_update_${LB_TAG}.sql" \
+                    --output-file="liquibase_update_${{ env.LB_TAG }}.sql" \
                     updateSQL
 
       - name: Upload updateSQL artifact
         if: ${{ env.DRY_RUN_ENABLED == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: "updateSQL-${{ env.LB_TAG }}"
-          path: "liquibase_update_${{ env.LB_TAG }}.sql"
+          name: "updateSQL-run-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "liquibase_update_run-${{ github.run_id }}-${{ github.run_attempt }}.sql"
+
       - name: Tag pre-deploy state
         id: tag_predeploy
         shell: bash
