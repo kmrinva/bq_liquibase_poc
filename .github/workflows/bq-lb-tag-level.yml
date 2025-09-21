@@ -121,9 +121,8 @@ jobs:
         if: ${{ env.DRY_RUN_ENABLED == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: "updateSQL-run-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: "liquibase_update_run-${{ github.run_id }}-${{ github.run_attempt }}.sql"          
-
+          name: "updateSQL-${{ env.LB_TAG }}"
+          path: "liquibase_update_${{ env.LB_TAG }}.sql"
       - name: Tag pre-deploy state
         id: tag_predeploy
         shell: bash
