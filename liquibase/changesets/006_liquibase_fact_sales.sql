@@ -1,5 +1,5 @@
 --liquibase formatted sql
---changeset poc-user:0006_fact_sales labels:bigquery,ddl context:prod,dev
+--changeset poc-user:006_fact_sales labels:bigquery,ddl context:prod,dev
 --comment: Create liquibase_fact_sales (transaction grain: one row per item per order)
 
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_fact_sales`

@@ -1,5 +1,5 @@
 --liquibase formatted sql
---changeset poc-user:0002_dim_date labels:bigquery,ddl context:prod,dev
+--changeset poc-user:002_dim_date labels:bigquery,ddl context:prod,dev
 --comment: Create liquibase_dim_date (calendar attributes)
 
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`

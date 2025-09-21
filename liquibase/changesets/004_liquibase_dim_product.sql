@@ -1,5 +1,5 @@
 --liquibase formatted sql
---changeset chatgpt:0004_dim_product labels:bigquery,ddl context:prod,dev
+--changeset poc-user:004_dim_product labels:bigquery,ddl context:prod,dev
 --comment: Create liquibase_dim_product (product catalog)
 
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_product`

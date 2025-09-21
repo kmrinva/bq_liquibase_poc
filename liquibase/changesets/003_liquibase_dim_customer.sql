@@ -1,5 +1,5 @@
 --liquibase formatted sql
---changeset poc-user:0003_dim_customer labels:bigquery,ddl context:prod,dev
+--changeset poc-user:003_dim_customer labels:bigquery,ddl context:prod,dev
 --comment: Create liquibase_dim_customer (customer master)
 
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_customer`
