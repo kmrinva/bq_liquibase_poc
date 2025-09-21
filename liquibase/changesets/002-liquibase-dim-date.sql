@@ -1,10 +1,10 @@
 --liquibase formatted sql
---changeset poc-user:002_dim_date labels:bigquery,ddl context:prod,dev
---comment: Create liquibase_dim_date (calendar attributes)
 
+--changeset poc-user:002a_dim_date labels:bigquery,ddl context:prod,dev
+--comment: Create table only (separate from constraints)
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
 (
-  date_key DATE OPTIONS(description="Business date (YYYY‑MM‑DD) – surrogate natural key"),
+  date_key DATE OPTIONS(description="Business date (YYYY-MM-DD) – surrogate natural key"),
   day_of_week INT64 OPTIONS(description="ISO day of week (1=Mon … 7=Sun)"),
   day_name STRING OPTIONS(description="Localized day name, e.g., Monday"),
   week_of_year INT64 OPTIONS(description="ISO week number (1–53)"),
@@ -17,7 +17,12 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
 PARTITION BY date_key
 OPTIONS(description="Date dimension with standard calendar attributes");
 
+--rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_date`;
+
+--changeset poc-user:002b_dim_date_pk labels:bigquery,ddl context:prod,dev
+--comment: Intentionally invalid BigQuery constraint (named PK) to trigger failure and test rollback-to-tag
 ALTER TABLE `my_poc_dataset.liquibase_dim_date`
   ADD CONSTRAINT pk_liquibase_dim_date PRIMARY KEY(date_key) NOT ENFORCED;
 
---rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_date`;
+--rollback ALTER TABLE `my_poc_dataset.liquibase_dim_date` DROP PRIMARY KEY;
+
