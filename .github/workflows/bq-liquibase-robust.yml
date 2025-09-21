@@ -18,6 +18,7 @@ jobs:
       PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       BQ_DATASET: ${{ secrets.BQ_DATASET }}
       SA_EMAIL: ${{ secrets.GCP_SA_EMAIL }}
+      DRY_RUN_ENABLED: 'false'
 
     steps:
       - name: Checkout
@@ -92,6 +93,7 @@ jobs:
                     validate
 
       - name: Dry run (updateSQL)
+        if: env.DRY_RUN_ENABLED == 'true'
         shell: bash
         run: |
                   set -euo pipefail
@@ -115,6 +117,7 @@ jobs:
                     updateSQL
 
       - name: Upload updateSQL artifact
+        if: env.DRY_RUN_ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: updateSQL-${ env.LB_TAG }
