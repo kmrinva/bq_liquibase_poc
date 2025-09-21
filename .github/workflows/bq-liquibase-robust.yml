@@ -18,7 +18,7 @@ jobs:
       PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       BQ_DATASET: ${{ secrets.BQ_DATASET }}
       SA_EMAIL: ${{ secrets.GCP_SA_EMAIL }}
-      DRY_RUN_ENABLED: 'false'
+      DRY_RUN_ENABLED: 'true'
 
     steps:
       - name: Checkout
