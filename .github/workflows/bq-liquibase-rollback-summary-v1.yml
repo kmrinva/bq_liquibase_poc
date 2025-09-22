@@ -231,7 +231,7 @@ jobs:
           echo "Final database status:"
           eval "$LB_BASE_CMD status --verbose" || echo "Status check failed"
 
-- name: Deployment summary
+      - name: Deployment summary
         if: always()
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
@@ -243,54 +243,41 @@ jobs:
           # Display failure details if any step failed
           if [ -n "${FAILURE_STEP:-}" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Failure Details" >> $GITHUB_STEP_SUMMARY
             echo "- **Failed Step**: ${{ env.FAILURE_STEP }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Failure Details**: ${{ env.FAILURE_DETAILS }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failure Reason**: ${{ env.FAILURE_DETAILS }}" >> $GITHUB_STEP_SUMMARY
             
-            if [ -n "${ERROR_SUGGESTION:-}" ]; then
-              echo "- **Suggested Fix**: ${{ env.ERROR_SUGGESTION }}" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            if [ -n "${BIGQUERY_ERROR:-}" ]; then
+            if [ -n "${FAILING_SQL:-}" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### BigQuery Error Details:" >> $GITHUB_STEP_SUMMARY
+              echo "### SQL Error Details:" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "${{ env.BIGQUERY_ERROR }}" >> $GITHUB_STEP_SUMMARY
+              echo "${{ env.FAILING_SQL }}" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
             fi
             
-            if [ -n "${FULL_ERROR_OUTPUT:-}" ]; then
+            if [ -n "${ERROR_OUTPUT:-}" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### Complete Error Output:" >> $GITHUB_STEP_SUMMARY
+              echo "### Error Output:" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "${{ env.FULL_ERROR_OUTPUT }}" >> $GITHUB_STEP_SUMMARY
+              echo "${{ env.ERROR_OUTPUT }}" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
             fi
             
             if [ -n "${ROLLBACK_ERROR:-}" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### 🚨 CRITICAL - Rollback Failed:" >> $GITHUB_STEP_SUMMARY
+              echo "### 🚨 CRITICAL - Rollback Error:" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
               echo "${{ env.ROLLBACK_ERROR }}" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "**MANUAL INTERVENTION REQUIRED**" >> $GITHUB_STEP_SUMMARY
             fi
             
             if [ -n "${SAFETY_ROLLBACK_ERROR:-}" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### 🚨 CRITICAL - Safety Rollback Failed:" >> $GITHUB_STEP_SUMMARY
+              echo "### 🚨 CRITICAL - Safety Rollback Error:" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
               echo "${{ env.SAFETY_ROLLBACK_ERROR }}" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
             fi
-            
-            # Add troubleshooting tips
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔧 Troubleshooting Tips:" >> $GITHUB_STEP_SUMMARY
-            echo "1. Check if the dataset \`my_poc_migrations\` exists in BigQuery" >> $GITHUB_STEP_SUMMARY
-            echo "2. Verify service account permissions for BigQuery" >> $GITHUB_STEP_SUMMARY
-            echo "3. Review the specific changeset mentioned in the error" >> $GITHUB_STEP_SUMMARY
-            echo "4. Test the SQL manually in BigQuery console" >> $GITHUB_STEP_SUMMARY
           else
             # Success cases
             if [ "${{ steps.lb_update.outcome }}" == "success" ]; then

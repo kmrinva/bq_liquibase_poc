@@ -7,7 +7,7 @@
 --changeset author:jane.smith id:009-create-product-categories-table
 --comment: Create reference table with 3 columns for product categories
 
-CREATE TABLE `my_poc_migrations.liquibase_product_categories` (
+CREATE TABLE `my_poc_dataset.liquibase_product_categories` (
   category_id STRING NOT NULL,
   category_name STRING NOT NULL,
   description STRING
@@ -20,10 +20,10 @@ OPTIONS(
 );
 
 -- Additional syntax error in INSERT
-INSERT INTO `my_poc_migrations.product_categories` 
+INSERT INTO `my_poc_dataset.product_categories` 
 VALUES 
   ('CAT001', 'Electronics', 'Electronic devices and accessories'),
   ('CAT002', 'Clothing', 'Apparel and fashion items'),
   ('CAT003', 'Home & Garden' 'Home improvement and gardening supplies');  -- ERROR: Missing comma
 
---rollback DROP TABLE IF EXISTS `my_poc_migrations.liquibase_product_categories`;
+--rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_product_categories`;

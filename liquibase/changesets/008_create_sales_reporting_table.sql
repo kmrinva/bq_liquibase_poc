@@ -7,7 +7,7 @@
 --changeset author:john.doe id:008-create-sales-reporting-table
 --comment: Create flat reporting table with 7 columns for sales analytics
 
-CREATE TABLE `my_poc_migrations.liquibase_sales_reporting` (
+CREATE TABLE `my_poc_dataset.liquibase_sales_reporting` (
   report_id STRING NOT NULL,
   customer_id STRING NOT NULL,
   product_name STRING,
@@ -23,4 +23,4 @@ OPTIONS(
   labels=[("environment", "poc"), ("team", "analytics")]
 );
 
---rollback DROP TABLE IF EXISTS `my_poc_migrations.liquibase_sales_reporting`;
+--rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_sales_reporting`;
