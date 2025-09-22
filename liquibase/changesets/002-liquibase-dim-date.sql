@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
   month_name STRING OPTIONS(description="Localized month name, e.g., January"),
   quarter INT64 OPTIONS(description="Quarter number (1–4)"),
   year INT64 OPTIONS(description="Calendar year, e.g., 2025"),
-  is_business_day BOOL OPTIONS(description="True if typical business day"),
+  is_business_day BOOL OPTIONS(description="True if typical business day")
 )
 PARTITION BY date_key
 OPTIONS(description="Date dimension with standard calendar attributes");
