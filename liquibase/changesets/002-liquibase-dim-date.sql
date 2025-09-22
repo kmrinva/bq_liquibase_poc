@@ -12,17 +12,11 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
   month_name STRING OPTIONS(description="Localized month name, e.g., January"),
   quarter INT64 OPTIONS(description="Quarter number (1–4)"),
   year INT64 OPTIONS(description="Calendar year, e.g., 2025"),
-  is_business_day BOOL OPTIONS(description="True if typical business day")
+  is_business_day BOOL OPTIONS(description="True if typical business day"),
 )
 PARTITION BY date_key
 OPTIONS(description="Date dimension with standard calendar attributes");
 
 --rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_date`;
 
---changeset poc-user:002b_dim_date_pk labels:bigquery,ddl context:prod,dev
---comment: Intentionally invalid BigQuery constraint (named PK) to trigger failure and test rollback-to-tag
-ALTER TABLE `my_poc_dataset.liquibase_dim_date`
-  ADD CONSTRAINT pk_liquibase_dim_date PRIMARY KEY(date_key) NOT ENFORCED;
-
---rollback ALTER TABLE `my_poc_dataset.liquibase_dim_date` DROP PRIMARY KEY;
 

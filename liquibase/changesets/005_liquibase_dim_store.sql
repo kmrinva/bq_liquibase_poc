@@ -15,7 +15,3 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_store`
 )
 OPTIONS(description="Store/channel dimension for sales attribution");
 
-ALTER TABLE `my_poc_dataset.liquibase_dim_store`
-  ADD CONSTRAINT pk_liquibase_dim_store PRIMARY KEY(store_id) NOT ENFORCED;
-
---rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_store`;

@@ -15,7 +15,4 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_product`
 )
 OPTIONS(description="Product dimension with category and pricing attributes");
 
-ALTER TABLE `my_poc_dataset.liquibase_dim_product`
-  ADD CONSTRAINT pk_liquibase_dim_product PRIMARY KEY(product_id) NOT ENFORCED;
 
---rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_product`;

@@ -17,7 +17,4 @@ CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_customer`
 )
 OPTIONS(description="Customer dimension with contact and geography attributes");
 
-ALTER TABLE `my_poc_dataset.liquibase_dim_customer`
-  ADD CONSTRAINT pk_liquibase_dim_customer PRIMARY KEY(customer_id) NOT ENFORCED;
-
 --rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_customer`;

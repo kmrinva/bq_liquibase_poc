@@ -21,16 +21,4 @@ PARTITION BY order_date
 CLUSTER BY customer_id, product_id
 OPTIONS(description="Sales fact at item-line grain; partitioned by order_date and clustered by keys");
 
-ALTER TABLE `my_poc_dataset.liquibase_fact_sales`
-  ADD CONSTRAINT pk_liquibase_fact_sales PRIMARY KEY (sales_id) NOT ENFORCED;
-
-ALTER TABLE `my_poc_dataset.liquibase_fact_sales`
-  ADD CONSTRAINT fk_sales_customer FOREIGN KEY (customer_id) REFERENCES `my_poc_dataset.liquibase_dim_customer` (customer_id) NOT ENFORCED;
-
-ALTER TABLE `my_poc_dataset.liquibase_fact_sales`
-  ADD CONSTRAINT fk_sales_product FOREIGN KEY (product_id) REFERENCES `my_poc_dataset.liquibase_dim_product` (product_id) NOT ENFORCED;
-
-ALTER TABLE `my_poc_dataset.liquibase_fact_sales`
-  ADD CONSTRAINT fk_sales_store FOREIGN KEY (store_id) REFERENCES `my_poc_dataset.liquibase_dim_store` (store_id) NOT ENFORCED;
-
 --rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_fact_sales`;
