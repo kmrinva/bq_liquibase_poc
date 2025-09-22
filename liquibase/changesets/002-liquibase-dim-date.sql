@@ -1,7 +1,7 @@
 --liquibase formatted sql
 
 --changeset poc-user:002a_dim_date labels:bigquery,ddl context:prod,dev
---comment: Create table only (separate from constraints)
+--comment: Create table only
 CREATE TABLE IF NOT EXISTS `my_poc_dataset.liquibase_dim_date`
 (
   date_key DATE OPTIONS(description="Business date (YYYY-MM-DD) – surrogate natural key"),
@@ -18,5 +18,3 @@ PARTITION BY date_key
 OPTIONS(description="Date dimension with standard calendar attributes");
 
 --rollback DROP TABLE IF EXISTS `my_poc_dataset.liquibase_dim_date`;
-
-
