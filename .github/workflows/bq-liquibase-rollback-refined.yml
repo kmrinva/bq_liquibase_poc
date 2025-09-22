@@ -109,8 +109,8 @@ jobs:
           echo "Status output:"
           echo "$STATUS_OUTPUT"
           
-          # Check if there are unrun changesets
-          if echo "$STATUS_OUTPUT" | grep -q "changesets have not been applied"; then
+          # Check if there are unrun changesets (handle both singular and plural)
+          if echo "$STATUS_OUTPUT" | grep -qE "changeset(s)? (has|have) not been applied"; then
             echo "has_pending_changes=true" >> "$GITHUB_OUTPUT"
             echo "Pending changes detected"
           else
