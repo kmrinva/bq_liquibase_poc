@@ -1,0 +1,337 @@
+name: Liquibase BigQuery Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_count:
+        description: 'Number of changesets to rollback'
+        required: true
+        default: '1'
+        type: string
+      rollback_tag:
+        description: 'Specific tag to rollback to (optional - overrides count)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run - show what would be rolled back without executing'
+        required: true
+        default: true
+        type: boolean
+      confirm_rollback:
+        description: 'Type CONFIRM to proceed with rollback'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      BQ_DATASET: ${{ secrets.BQ_DATASET }}
+      SA_EMAIL: ${{ secrets.GCP_SA_EMAIL }}
+      ROLLBACK_COUNT: ${{ github.event.inputs.rollback_count }}
+      ROLLBACK_TAG: ${{ github.event.inputs.rollback_tag }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+      CONFIRM_ROLLBACK: ${{ github.event.inputs.confirm_rollback }}
+      LB_DRIVER: com.simba.googlebigquery.jdbc.Driver
+      LB_CHANGELOG: liquibase/changelog.xml
+      LB_LOG_LEVEL: info
+      ROLLBACK_TAG_NAME: rollback-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Validate inputs
+        run: |
+          echo "## Rollback Request Validation" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rollback Count**: ${{ env.ROLLBACK_COUNT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rollback Tag**: ${{ env.ROLLBACK_TAG || 'Not specified' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirmation**: ${{ env.CONFIRM_ROLLBACK }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Validate confirmation
+          if [ "${{ env.CONFIRM_ROLLBACK }}" != "CONFIRM" ]; then
+            echo "❌ **ERROR**: You must type 'CONFIRM' to proceed with rollback" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Input validation" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Confirmation required - type CONFIRM in the confirm_rollback field" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          # Validate rollback count is a number
+          if [ -n "${{ env.ROLLBACK_COUNT }}" ] && ! [[ "${{ env.ROLLBACK_COUNT }}" =~ ^[0-9]+$ ]]; then
+            echo "❌ **ERROR**: Rollback count must be a positive number" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Input validation" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Invalid rollback count: ${{ env.ROLLBACK_COUNT }}" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "✅ Input validation passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare folders
+        run: mkdir -p lib
+
+      - name: Download Liquibase CLI
+        run: |
+          curl -L -o "$RUNNER_TEMP/liquibase.zip" https://github.com/liquibase/liquibase/releases/download/v4.29.2/liquibase-4.29.2.zip
+          unzip -q "$RUNNER_TEMP/liquibase.zip" -d "$HOME/liquibase"
+          chmod +x "$HOME/liquibase/liquibase"
+          echo "LB=$HOME/liquibase/liquibase" >> "$GITHUB_ENV"
+
+      - name: Download Liquibase BigQuery extension (JAR)
+        run: |
+          curl -L -o lib/liquibase-bigquery-4.33.0.jar https://repo1.maven.org/maven2/org/liquibase/ext/liquibase-bigquery/4.33.0/liquibase-bigquery-4.33.0.jar
+
+      - name: Download BigQuery JDBC driver (Simba)
+        run: |
+          set -e
+          curl -L -o "$RUNNER_TEMP/bqjdbc.zip" "https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip"
+          unzip -q "$RUNNER_TEMP/bqjdbc.zip" -d "$RUNNER_TEMP/bqjdbc"
+          find "$RUNNER_TEMP/bqjdbc" -type f -name "*.jar" -exec cp -v {} lib/ \;
+
+      - name: Write service account key & set path
+        run: |
+          printf '%s' '${{ secrets.GCP_SA_KEY }}' > "$RUNNER_TEMP/sa.json"
+          echo "SA_KEY_PATH=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Build classpath and Liquibase config
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=("$GITHUB_WORKSPACE"/lib/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "ERROR: No JARs found in $GITHUB_WORKSPACE/lib"
+            echo "FAILURE_STEP=Build classpath - JAR discovery" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=No JAR files found in lib directory" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          CLASSPATH=$(IFS=:; echo "${jars[*]}")
+          echo "CLASSPATH=$CLASSPATH" >> "$GITHUB_ENV"
+          
+          LB_URL="jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443;ProjectId=${PROJECT_ID};DefaultDataset=${BQ_DATASET};OAuthType=0;OAuthServiceAcctEmail=${SA_EMAIL};OAuthPvtKeyPath=${SA_KEY_PATH}"
+          echo "LB_URL=$LB_URL" >> "$GITHUB_ENV"
+          
+          LB_BASE_CMD="\"$LB\" --driver=\"$LB_DRIVER\" --classpath=\"$CLASSPATH\" --url=\"$LB_URL\" --changeLogFile=\"$LB_CHANGELOG\" --log-level=\"$LB_LOG_LEVEL\""
+          echo "LB_BASE_CMD=$LB_BASE_CMD" >> "$GITHUB_ENV"
+
+      - name: Check current database status
+        id: current_status
+        run: |
+          echo "## Current Database Status" >> $GITHUB_STEP_SUMMARY
+          
+          if ! STATUS_OUTPUT=$(eval "$LB_BASE_CMD status --verbose" 2>&1); then
+            echo "❌ **ERROR**: Unable to connect to database or retrieve status" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Database connection check" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Unable to connect to BigQuery or retrieve status" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "Database status retrieved successfully" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$STATUS_OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          # Count applied changesets
+          APPLIED_COUNT=$(echo "$STATUS_OUTPUT" | grep -c "changeset.*was executed" || echo "0")
+          echo "**Applied Changesets**: $APPLIED_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "applied_count=$APPLIED_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Validate rollback request
+        run: |
+          APPLIED_COUNT=${{ steps.current_status.outputs.applied_count }}
+          REQUESTED_COUNT=${{ env.ROLLBACK_COUNT }}
+          
+          echo "## Rollback Validation" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ env.ROLLBACK_TAG }}" ]; then
+            echo "- **Mode**: Rollback to specific tag '${{ env.ROLLBACK_TAG }}'" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Mode**: Rollback $REQUESTED_COUNT changeset(s)" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "$REQUESTED_COUNT" -gt "$APPLIED_COUNT" ]; then
+              echo "❌ **ERROR**: Cannot rollback $REQUESTED_COUNT changesets - only $APPLIED_COUNT applied" >> $GITHUB_STEP_SUMMARY
+              echo "FAILURE_STEP=Rollback validation" >> "$GITHUB_ENV"
+              echo "FAILURE_DETAILS=Requested rollback count ($REQUESTED_COUNT) exceeds applied changesets ($APPLIED_COUNT)" >> "$GITHUB_ENV"
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Rollback request is valid" >> $GITHUB_STEP_SUMMARY
+
+      - name: Tag current state for safety
+        id: safety_tag
+        run: |
+          echo "Creating safety tag before rollback: ${{ env.ROLLBACK_TAG_NAME }}"
+          
+          if ! eval "$LB_BASE_CMD tag \"${{ env.ROLLBACK_TAG_NAME }}\""; then
+            echo "FAILURE_STEP=Safety tagging" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Failed to create safety tag ${{ env.ROLLBACK_TAG_NAME }}" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "tagged=true" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${{ env.ROLLBACK_TAG_NAME }}" >> "$GITHUB_OUTPUT"
+          echo "✅ Safety tag created: ${{ env.ROLLBACK_TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate rollback SQL (dry run)
+        id: rollback_sql
+        run: |
+          echo "## Rollback Preview" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine rollback command
+          if [ -n "${{ env.ROLLBACK_TAG }}" ]; then
+            ROLLBACK_CMD="$LB_BASE_CMD rollbackSQL --tag=\"${{ env.ROLLBACK_TAG }}\""
+            ROLLBACK_DESC="to tag '${{ env.ROLLBACK_TAG }}'"
+          else
+            ROLLBACK_CMD="$LB_BASE_CMD rollbackSQL --count=${{ env.ROLLBACK_COUNT }}"
+            ROLLBACK_DESC="${{ env.ROLLBACK_COUNT }} changeset(s)"
+          fi
+          
+          echo "Generating rollback SQL for $ROLLBACK_DESC..."
+          
+          if ! ROLLBACK_SQL_OUTPUT=$(eval "$ROLLBACK_CMD --output-file=\"rollback_preview_${ROLLBACK_TAG_NAME}.sql\"" 2>&1); then
+            echo "❌ **ERROR**: Failed to generate rollback SQL" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Rollback SQL generation" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Failed to generate rollback SQL: $ROLLBACK_SQL_OUTPUT" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "✅ **Rollback SQL generated successfully**" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: $ROLLBACK_DESC" >> $GITHUB_STEP_SUMMARY
+          echo "- **File**: rollback_preview_${ROLLBACK_TAG_NAME}.sql" >> $GITHUB_STEP_SUMMARY
+          
+          # Show preview of SQL
+          if [ -f "rollback_preview_${ROLLBACK_TAG_NAME}.sql" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Rollback SQL Preview:" >> $GITHUB_STEP_SUMMARY
+            echo '```sql' >> $GITHUB_STEP_SUMMARY
+            head -50 "rollback_preview_${ROLLBACK_TAG_NAME}.sql" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload rollback SQL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "rollback-preview-${{ env.ROLLBACK_TAG_NAME }}"
+          path: "**/rollback_preview_*.sql"
+
+      - name: Execute rollback
+        id: execute_rollback
+        if: env.DRY_RUN == 'false'
+        run: |
+          echo "## Executing Rollback" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine rollback command
+          if [ -n "${{ env.ROLLBACK_TAG }}" ]; then
+            ROLLBACK_CMD="$LB_BASE_CMD rollback --tag=\"${{ env.ROLLBACK_TAG }}\""
+            ROLLBACK_DESC="to tag '${{ env.ROLLBACK_TAG }}'"
+          else
+            ROLLBACK_CMD="$LB_BASE_CMD rollback --count=${{ env.ROLLBACK_COUNT }}"
+            ROLLBACK_DESC="${{ env.ROLLBACK_COUNT }} changeset(s)"
+          fi
+          
+          echo "Executing rollback $ROLLBACK_DESC..."
+          
+          if ! ROLLBACK_OUTPUT=$(eval "$ROLLBACK_CMD" 2>&1); then
+            echo "❌ **ROLLBACK FAILED**" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Rollback execution" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Rollback failed for $ROLLBACK_DESC" >> "$GITHUB_ENV"
+            echo "ROLLBACK_ERROR<<EOF" >> "$GITHUB_ENV"
+            echo "$ROLLBACK_OUTPUT" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "✅ **Rollback completed successfully**" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: $ROLLBACK_DESC" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Rollback Output:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$ROLLBACK_OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Post-rollback verification
+        if: env.DRY_RUN == 'false' && steps.execute_rollback.outcome == 'success'
+        run: |
+          echo "## Post-Rollback Verification" >> $GITHUB_STEP_SUMMARY
+          
+          if ! FINAL_STATUS=$(eval "$LB_BASE_CMD status --verbose" 2>&1); then
+            echo "⚠️ **WARNING**: Post-rollback status check failed" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Post-rollback verification" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Status check failed after rollback" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "✅ Database status verified after rollback" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$FINAL_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Emergency recovery (if rollback fails)
+        if: failure() && steps.safety_tag.outputs.tagged == 'true' && steps.execute_rollback.outcome == 'failure'
+        run: |
+          echo "## 🚨 Emergency Recovery" >> $GITHUB_STEP_SUMMARY
+          echo "Rollback failed - attempting to restore to safety tag: ${{ steps.safety_tag.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          
+          if ! RECOVERY_OUTPUT=$(eval "$LB_BASE_CMD rollback --tag=\"${{ steps.safety_tag.outputs.tag_name }}\"" 2>&1); then
+            echo "💥 **CRITICAL**: Emergency recovery failed!" >> $GITHUB_STEP_SUMMARY
+            echo "**MANUAL INTERVENTION REQUIRED**" >> $GITHUB_STEP_SUMMARY
+            echo "Safety tag: ${{ steps.safety_tag.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "FAILURE_STEP=Critical: Emergency recovery failed" >> "$GITHUB_ENV"
+            echo "FAILURE_DETAILS=Unable to restore database to safety tag" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          
+          echo "✅ Emergency recovery successful - restored to safety tag" >> $GITHUB_STEP_SUMMARY
+
+      - name: Release Liquibase locks
+        if: always()
+        run: |
+          eval "$LB_BASE_CMD releaseLocks" || echo "Failed to release locks (may not exist)"
+
+      - name: Rollback summary
+        if: always()
+        run: |
+          echo "## 🔄 Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rollback Mode**: ${{ env.ROLLBACK_TAG && format('Tag: {0}', env.ROLLBACK_TAG) || format('Count: {0}', env.ROLLBACK_COUNT) }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Safety Tag**: ${{ steps.safety_tag.outputs.tag_name || 'Not created' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Status**: ${{ steps.execute_rollback.outcome || 'Skipped (dry run)' }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Display failure details if any step failed
+          if [ -n "${FAILURE_STEP:-}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Rollback Failed" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failed Step**: ${{ env.FAILURE_STEP }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failure Details**: ${{ env.FAILURE_DETAILS }}" >> $GITHUB_STEP_SUMMARY
+            
+            if [ -n "${ROLLBACK_ERROR:-}" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Error Details:" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "${{ env.ROLLBACK_ERROR }}" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔧 Recovery Options:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Check the rollback SQL artifact for manual execution" >> $GITHUB_STEP_SUMMARY
+            echo "2. Use safety tag '${{ steps.safety_tag.outputs.tag_name }}' for manual recovery" >> $GITHUB_STEP_SUMMARY
+            echo "3. Review database logs for additional context" >> $GITHUB_STEP_SUMMARY
+          else
+            if [ "${{ env.DRY_RUN }}" == "true" ]; then
+              echo "- **Result**: 🔍 Dry run completed - review rollback SQL artifact" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Result**: ✅ Rollback executed successfully" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
