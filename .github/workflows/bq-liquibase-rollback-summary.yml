@@ -231,7 +231,7 @@ jobs:
           echo "Final database status:"
           eval "$LB_BASE_CMD status --verbose" || echo "Status check failed"
 
-- name: Deployment summary
+      - name: Deployment summary
         if: always()
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
