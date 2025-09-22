@@ -53,7 +53,7 @@ jobs:
           
           # Validate confirmation
           if [ "${{ env.CONFIRM_ROLLBACK }}" != "CONFIRM" ]; then
-            echo "❌ **ERROR**: You must type 'CONFIRM' to proceed with rollback" >> $GITHUB_STEP_SUMMARY
+            echo "ERROR: You must type 'CONFIRM' to proceed with rollback" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Input validation" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Confirmation required - type CONFIRM in the confirm_rollback field" >> "$GITHUB_ENV"
             exit 1
@@ -61,13 +61,13 @@ jobs:
           
           # Validate rollback count is a number
           if [ -n "${{ env.ROLLBACK_COUNT }}" ] && ! [[ "${{ env.ROLLBACK_COUNT }}" =~ ^[0-9]+$ ]]; then
-            echo "❌ **ERROR**: Rollback count must be a positive number" >> $GITHUB_STEP_SUMMARY
+            echo "ERROR: Rollback count must be a positive number" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Input validation" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Invalid rollback count: ${{ env.ROLLBACK_COUNT }}" >> "$GITHUB_ENV"
             exit 1
           fi
           
-          echo "✅ Input validation passed" >> $GITHUB_STEP_SUMMARY
+          echo "Input validation passed" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
           echo "## Current Database Status" >> $GITHUB_STEP_SUMMARY
           
           if ! STATUS_OUTPUT=$(eval "$LB_BASE_CMD status --verbose" 2>&1); then
-            echo "❌ **ERROR**: Unable to connect to database or retrieve status" >> $GITHUB_STEP_SUMMARY
+            echo "ERROR: Unable to connect to database or retrieve status" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Database connection check" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Unable to connect to BigQuery or retrieve status" >> "$GITHUB_ENV"
             exit 1
@@ -159,14 +159,14 @@ jobs:
             echo "- **Mode**: Rollback $REQUESTED_COUNT changeset(s)" >> $GITHUB_STEP_SUMMARY
             
             if [ "$REQUESTED_COUNT" -gt "$APPLIED_COUNT" ]; then
-              echo "❌ **ERROR**: Cannot rollback $REQUESTED_COUNT changesets - only $APPLIED_COUNT applied" >> $GITHUB_STEP_SUMMARY
+              echo "ERROR: Cannot rollback $REQUESTED_COUNT changesets - only $APPLIED_COUNT applied" >> $GITHUB_STEP_SUMMARY
               echo "FAILURE_STEP=Rollback validation" >> "$GITHUB_ENV"
               echo "FAILURE_DETAILS=Requested rollback count ($REQUESTED_COUNT) exceeds applied changesets ($APPLIED_COUNT)" >> "$GITHUB_ENV"
               exit 1
             fi
           fi
           
-          echo "✅ Rollback request is valid" >> $GITHUB_STEP_SUMMARY
+          echo "Rollback request is valid" >> $GITHUB_STEP_SUMMARY
 
       - name: Tag current state for safety
         id: safety_tag
@@ -181,7 +181,7 @@ jobs:
           
           echo "tagged=true" >> "$GITHUB_OUTPUT"
           echo "tag_name=${{ env.ROLLBACK_TAG_NAME }}" >> "$GITHUB_OUTPUT"
-          echo "✅ Safety tag created: ${{ env.ROLLBACK_TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "Safety tag created: ${{ env.ROLLBACK_TAG_NAME }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Generate rollback SQL (dry run)
         id: rollback_sql
@@ -200,13 +200,13 @@ jobs:
           echo "Generating rollback SQL for $ROLLBACK_DESC..."
           
           if ! ROLLBACK_SQL_OUTPUT=$(eval "$ROLLBACK_CMD --output-file=\"rollback_preview_${ROLLBACK_TAG_NAME}.sql\"" 2>&1); then
-            echo "❌ **ERROR**: Failed to generate rollback SQL" >> $GITHUB_STEP_SUMMARY
+            echo "ERROR: Failed to generate rollback SQL" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Rollback SQL generation" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Failed to generate rollback SQL: $ROLLBACK_SQL_OUTPUT" >> "$GITHUB_ENV"
             exit 1
           fi
           
-          echo "✅ **Rollback SQL generated successfully**" >> $GITHUB_STEP_SUMMARY
+          echo "**Rollback SQL generated successfully**" >> $GITHUB_STEP_SUMMARY
           echo "- **Target**: $ROLLBACK_DESC" >> $GITHUB_STEP_SUMMARY
           echo "- **File**: rollback_preview_${ROLLBACK_TAG_NAME}.sql" >> $GITHUB_STEP_SUMMARY
           
@@ -243,7 +243,7 @@ jobs:
           echo "Executing rollback $ROLLBACK_DESC..."
           
           if ! ROLLBACK_OUTPUT=$(eval "$ROLLBACK_CMD" 2>&1); then
-            echo "❌ **ROLLBACK FAILED**" >> $GITHUB_STEP_SUMMARY
+            echo "**ROLLBACK FAILED**" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Rollback execution" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Rollback failed for $ROLLBACK_DESC" >> "$GITHUB_ENV"
             echo "ROLLBACK_ERROR<<EOF" >> "$GITHUB_ENV"
@@ -252,7 +252,7 @@ jobs:
             exit 1
           fi
           
-          echo "✅ **Rollback completed successfully**" >> $GITHUB_STEP_SUMMARY
+          echo "**Rollback completed successfully**" >> $GITHUB_STEP_SUMMARY
           echo "- **Target**: $ROLLBACK_DESC" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rollback Output:" >> $GITHUB_STEP_SUMMARY
@@ -266,13 +266,13 @@ jobs:
           echo "## Post-Rollback Verification" >> $GITHUB_STEP_SUMMARY
           
           if ! FINAL_STATUS=$(eval "$LB_BASE_CMD status --verbose" 2>&1); then
-            echo "⚠️ **WARNING**: Post-rollback status check failed" >> $GITHUB_STEP_SUMMARY
+            echo "**WARNING**: Post-rollback status check failed" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Post-rollback verification" >> "$GITHUB_ENV"
             echo "FAILURE_DETAILS=Status check failed after rollback" >> "$GITHUB_ENV"
             exit 1
           fi
           
-          echo "✅ Database status verified after rollback" >> $GITHUB_STEP_SUMMARY
+          echo "Database status verified after rollback" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "$FINAL_STATUS" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -280,11 +280,11 @@ jobs:
       - name: Emergency recovery (if rollback fails)
         if: failure() && steps.safety_tag.outputs.tagged == 'true' && steps.execute_rollback.outcome == 'failure'
         run: |
-          echo "## 🚨 Emergency Recovery" >> $GITHUB_STEP_SUMMARY
+          echo "## Emergency Recovery" >> $GITHUB_STEP_SUMMARY
           echo "Rollback failed - attempting to restore to safety tag: ${{ steps.safety_tag.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
           
           if ! RECOVERY_OUTPUT=$(eval "$LB_BASE_CMD rollback --tag=\"${{ steps.safety_tag.outputs.tag_name }}\"" 2>&1); then
-            echo "💥 **CRITICAL**: Emergency recovery failed!" >> $GITHUB_STEP_SUMMARY
+            echo "**CRITICAL**: Emergency recovery failed!" >> $GITHUB_STEP_SUMMARY
             echo "**MANUAL INTERVENTION REQUIRED**" >> $GITHUB_STEP_SUMMARY
             echo "Safety tag: ${{ steps.safety_tag.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
             echo "FAILURE_STEP=Critical: Emergency recovery failed" >> "$GITHUB_ENV"
@@ -292,7 +292,7 @@ jobs:
             exit 1
           fi
           
-          echo "✅ Emergency recovery successful - restored to safety tag" >> $GITHUB_STEP_SUMMARY
+          echo "Emergency recovery successful - restored to safety tag" >> $GITHUB_STEP_SUMMARY
 
       - name: Release Liquibase locks
         if: always()
@@ -302,7 +302,7 @@ jobs:
       - name: Rollback summary
         if: always()
         run: |
-          echo "## 🔄 Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Rollback Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Rollback Mode**: ${{ env.ROLLBACK_TAG && format('Tag: {0}', env.ROLLBACK_TAG) || format('Count: {0}', env.ROLLBACK_COUNT) }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Dry Run**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Safety Tag**: ${{ steps.safety_tag.outputs.tag_name || 'Not created' }}" >> $GITHUB_STEP_SUMMARY
@@ -311,7 +311,7 @@ jobs:
           # Display failure details if any step failed
           if [ -n "${FAILURE_STEP:-}" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "## ❌ Rollback Failed" >> $GITHUB_STEP_SUMMARY
+            echo "## Rollback Failed" >> $GITHUB_STEP_SUMMARY
             echo "- **Failed Step**: ${{ env.FAILURE_STEP }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Failure Details**: ${{ env.FAILURE_DETAILS }}" >> $GITHUB_STEP_SUMMARY
             
@@ -324,14 +324,14 @@ jobs:
             fi
             
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🔧 Recovery Options:" >> $GITHUB_STEP_SUMMARY
+            echo "### Recovery Options:" >> $GITHUB_STEP_SUMMARY
             echo "1. Check the rollback SQL artifact for manual execution" >> $GITHUB_STEP_SUMMARY
             echo "2. Use safety tag '${{ steps.safety_tag.outputs.tag_name }}' for manual recovery" >> $GITHUB_STEP_SUMMARY
             echo "3. Review database logs for additional context" >> $GITHUB_STEP_SUMMARY
           else
             if [ "${{ env.DRY_RUN }}" == "true" ]; then
-              echo "- **Result**: 🔍 Dry run completed - review rollback SQL artifact" >> $GITHUB_STEP_SUMMARY
+              echo "- **Result**: Dry run completed - review rollback SQL artifact" >> $GITHUB_STEP_SUMMARY
             else
-              echo "- **Result**: ✅ Rollback executed successfully" >> $GITHUB_STEP_SUMMARY
+              echo "- **Result**: Rollback executed successfully" >> $GITHUB_STEP_SUMMARY
             fi
           fi
